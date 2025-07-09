@@ -24,7 +24,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.get('/api/auth/me', async(req, res) => {
-
+  
   const token = req.cookies.token;
 
   if (!token) return res.status(401).json({ message: 'Unauthorized' });
@@ -64,10 +64,10 @@ const rooms = {};
 
 io.on('connection', (socket) => {
   console.log("New client connected");
-
+  
   socket.on("joinRoom", async ({ userId, roomId, color }) => {
     if (!rooms[roomId]) rooms[roomId] = [];
-
+    
     let players = rooms[roomId].filter(p => p.userId !== userId);
     rooms[roomId] = players;
 
@@ -91,7 +91,7 @@ io.on('connection', (socket) => {
     players.push({ socketId: socket.id, userId, color });
     socket.join(roomId);
     socket.data.roomId = roomId;
-
+    
     socket.emit("assignedColor", color);
     socket.to(roomId).emit("playerJoined", { message: `${userId} joined as ${color}` });
 
@@ -126,6 +126,7 @@ io.on('connection', (socket) => {
 
       rooms[roomId].forEach(player => {
         const opponent = rooms[roomId].find(p => p.socketId !== player.socketId);
+        console.log("Emitting bothe joined")
         io.to(player.socketId).emit("bothPlayersJoined", {
           gameId: game._id.toString(),
           moves: game.moves,
@@ -174,10 +175,11 @@ socket.on("DrawDeclined", ({ roomId }) => {
 
 
   socket.on("SendMove", async ({ move, gameId, userId, roomId }) => {
+    console.log("received move");
     try {
       const game = await Game.findById(gameId);
       if (!game) throw new Error("Game not found");
-
+      
       const chess = new Chess();
       for (const m of game.moves) chess.move(m);
 
@@ -197,18 +199,18 @@ socket.on("DrawDeclined", ({ roomId }) => {
         socket.emit("moveRejected", { error: "Illegal move!" });
         return;
       }
-
+      
       game.moves.push(result.san);
 
       const { moveQuality } = await analyzeMove(game, game.moves.slice(0, -1), move);
-
+      
       if (moveQuality && game[moveQuality]) {
             if (isWhitesTurn) {
              game[moveQuality].playerWhite += 1;
                } else {
                 game[moveQuality].playerBlack += 1;
            }
-}
+      }
 
       if (chess.isGameOver()) {
         if (chess.isDraw()) {
@@ -221,7 +223,8 @@ socket.on("DrawDeclined", ({ roomId }) => {
       }
 
       const updatedGame = await game.save();
-
+      console.log(updatedGame.moves.length);
+      console.log("SEnding back the move!");
       socket.to(roomId).emit("receiveMove", {
         move: result,
         fen: chess.fen(),
