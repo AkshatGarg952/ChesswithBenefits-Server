@@ -43,7 +43,6 @@ app.get('/api/auth/me', async(req, res) => {
 // API Routes
 app.use('/api/users', userRouter);
 app.use('/api/games', gameRouter);
-
 app.post('/api/commentary', async (req, res) => {
   try {
     const { mode, move, fen, lastMoves, isUserMove } = req.body.prompt;
@@ -249,7 +248,7 @@ socket.on("DrawDeclined", ({ roomId }) => {
   socket.on("call-user", ({ targetSocketId, offer }) => {
     io.to(targetSocketId).emit("incoming-call", { from: socket.id, offer });
   });
-
+  
   socket.on("answer-call", ({ targetSocketId, answer }) => {
     io.to(targetSocketId).emit("call-answered", { from: socket.id, answer });
   });

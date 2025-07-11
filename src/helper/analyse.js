@@ -2,20 +2,14 @@ import { spawn } from 'child_process';
 import { Chess } from 'chess.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 
-const STOCKFISH_PATH = path.resolve(__dirname, 'stockfish.exe');
+const STOCKFISH_PATH = path.resolve(__dirname, 'stockfish2.exe');
 
 function createEngine() {
-  if (!fs.existsSync(STOCKFISH_PATH)) {
-    throw new Error(`Stockfish binary not found at: ${STOCKFISH_PATH}`);
-  }
-
   const engine = spawn(STOCKFISH_PATH);
 
   engine.stderr.on('data', (data) => {
@@ -23,7 +17,7 @@ function createEngine() {
   });
 
   engine.on('error', (err) => {
-    console.error('Failed to start Stockfish:', err.message);
+    console.error('❌ Failed to start Stockfish:', err.message);
   });
 
   return engine;
@@ -31,23 +25,27 @@ function createEngine() {
 
 function evaluatePosition(engine, fen) {
   return new Promise((resolve) => {
-    engine.stdin.write('ucinewgame\n');
-    engine.stdin.write(`position fen ${fen}\n`);
-    engine.stdin.write('go depth 15\n');
+    let bestEval = null;
 
     engine.stdout.on('data', (data) => {
-      const line = data.toString();
-      // console.log('Engine:', line); // Uncomment to debug
+      const line = data.toString().trim();
 
       if (line.includes('score cp')) {
         const match = line.match(/score cp (-?\d+)/);
-        if (match) {
-          resolve(parseInt(match[1]));
-        }
+        if (match) bestEval = parseInt(match[1], 10);
       } else if (line.includes('score mate')) {
-        resolve(1000); // Very strong advantage for mate
+        bestEval = 1000; // Assign high value for mate
+      }
+
+      if (line.includes('bestmove')) {
+        resolve(bestEval);
       }
     });
+
+    engine.stdin.write('uci\n');
+    engine.stdin.write('ucinewgame\n');
+    engine.stdin.write(`position fen ${fen}\n`);
+    engine.stdin.write('go depth 15\n');
   });
 }
 
@@ -59,12 +57,18 @@ export default async function analyzeMove(game, previousMoves, currentMove) {
   chess.move(currentMove);
   const positionAfter = chess.fen();
 
-  const engine = createEngine();
-  const bestEval = await evaluatePosition(engine, positionBefore);
-  const playedEval = await evaluatePosition(engine, positionAfter);
-  engine.kill();
+  const engine1 = createEngine();
+  const engine2 = createEngine();
 
-  const evalLoss = Math.abs(playedEval - bestEval);
+  const [bestEval, playedEval] = await Promise.all([
+    evaluatePosition(engine1, positionBefore),
+    evaluatePosition(engine2, positionAfter),
+  ]);
+
+  engine1.kill();
+  engine2.kill();
+
+  const evalLoss = Math.abs((playedEval ?? 0) - (bestEval ?? 0));
 
   let moveQuality = '';
   if (evalLoss < 50) moveQuality = 'Best';
