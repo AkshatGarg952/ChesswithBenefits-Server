@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 
-const STOCKFISH_PATH = path.resolve(__dirname, 'stockfish2.exe');
+const STOCKFISH_PATH = path.resolve(__dirname, 'stockfish');
 
 function createEngine() {
   const engine = spawn(STOCKFISH_PATH);
