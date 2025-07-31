@@ -17,27 +17,24 @@ import jwt from 'jsonwebtoken';
 dotenv.config();
 const app = express();
 app.use(cors({
-  origin: 'https://chesswith-benefits-client.vercel.app', 
-  credentials: true             
+  origin: ['https://chesswith-benefits-client.vercel.app', 'http://localhost:5173'],
+  credentials: true
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.get('/api/auth/me', async(req, res) => {
-  
-  const token = req.cookies.token;
 
+app.get('/api/auth/me', async (req, res) => {
+  const token = req.cookies.token;
   if (!token) return res.status(401).json({ message: 'Unauthorized' });
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
     res.json({ user, token });
   } catch (err) {
-
     res.status(403).json({ message: 'Invalid token' });
-
   }
-
 });
 
 // API Routes
@@ -56,17 +53,30 @@ app.post('/api/commentary', async (req, res) => {
 });
 
 const http = createServer(app);
-const io = new Server(http, { cors: { origin: "*", credentials:true } });
+const io = new Server(http, {
+  cors: {
+    origin: ['http://localhost:5173', 'https://chesswith-benefits-client.vercel.app'],
+    credentials: true,
+    methods: ['GET', 'POST']
+  }
+});
 
-// In-memory room data
+
 const rooms = {};
 
 io.on('connection', (socket) => {
-  console.log("New client connected");
-  
+  console.log(`New client connected: ${socket.id}`);
+
   socket.on("joinRoom", async ({ userId, roomId, color }) => {
     if (!rooms[roomId]) rooms[roomId] = [];
+
     
+    const isAlreadyJoined = rooms[roomId].some(player => player.userId === userId);
+    if (isAlreadyJoined) {
+      socket.emit("errorMessage", "You are already in this room.");
+      return;
+    }
+
     let players = rooms[roomId].filter(p => p.userId !== userId);
     rooms[roomId] = players;
 
@@ -87,15 +97,37 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Log after validations
+    console.log(`User ${userId} (socket ${socket.id}) joined room ${roomId} with color ${color}`);
+
     players.push({ socketId: socket.id, userId, color });
     socket.join(roomId);
     socket.data.roomId = roomId;
-    
+
     socket.emit("assignedColor", color);
     socket.to(roomId).emit("playerJoined", { message: `${userId} joined as ${color}` });
 
-    // Emit game data and peer IDs when both players have joined
     if (rooms[roomId].length === 2) {
+      const firstPlayer = rooms[roomId].find(p => p.socketId !== socket.id);
+    if (firstPlayer) {
+      io.to(firstPlayer.socketId).emit("opponentJoined", {
+        message: `${userId} joined as ${color}`,
+        opponentSocketId: socket.id,
+        opponentUserId: userId,
+        opponentColor: color,
+        shouldInitiateCall: true // Flag to indicate who should start the call
+      });
+    }
+
+    // Notify the SECOND player (who just joined) about the first player
+    socket.emit("opponentJoined", {
+      message: `${firstPlayer.userId} is already here as ${firstPlayer.color}`,
+      opponentSocketId: firstPlayer.socketId,
+      opponentUserId: firstPlayer.userId,
+      opponentColor: firstPlayer.color,
+      shouldInitiateCall: false // They should wait for the call
+    });
+
       const whitePlayer = rooms[roomId].find(p => p.color === 'white');
       const blackPlayer = rooms[roomId].find(p => p.color === 'black');
 
@@ -115,70 +147,80 @@ io.on('connection', (socket) => {
           status: 'onGoing',
           winner: null,
         });
-        console.log("🎯 New game created:", game._id);
-      } else {
-        console.log("📦 Resuming game:", game._id);
       }
 
       const chess = new Chess();
       for (const move of game.moves) chess.move(move);
 
+      // rooms[roomId].forEach(player => {
+      //   const opponent = rooms[roomId].find(p => p.socketId !== player.socketId);
+      //   console.log("emitting both players joined!");
+      //   io.to(player.socketId).emit("bothPlayersJoined", {
+      //     gameId: game._id.toString(),
+      //     moves: game.moves,
+      //     fen: chess.fen(),
+      //     opponentSocketId: opponent?.socketId || null,
+      //   });
+      // });
+
       rooms[roomId].forEach(player => {
-        const opponent = rooms[roomId].find(p => p.socketId !== player.socketId);
-        console.log("Emitting bothe joined")
-        io.to(player.socketId).emit("bothPlayersJoined", {
-          gameId: game._id.toString(),
-          moves: game.moves,
-          fen: chess.fen(),
-          opponentSocketId: opponent?.socketId || null,
-        });
-      });
-    }
+  const opponent = rooms[roomId].find(p => p.socketId !== player.socketId);
+  console.log("emitting both players joined!");
+  io.to(player.socketId).emit("bothPlayersJoined", {
+    gameId: game._id.toString(),
+    moves: game.moves,
+    fen: chess.fen(),
+    opponentSocketId: opponent?.socketId || null,
+    opponentUserId: opponent?.userId || null, // Add this line
+    opponentColor: opponent?.color || null,   // Add this line
   });
-   
-
-  socket.on("Draw", ({ roomId}) => {
-  socket.to(roomId).emit("Opponent Draw");
 });
+    }
 
-  socket.on("Resign", async ({ roomId, gameId, userId}) => {
-  const oldGame = await Game.findById(gameId);
-  if(!oldGame){
-    throw new Error("Cannot find the game");
-  }
-  oldGame.status="finished"
-  if(oldGame.playerWhite===userId){
-    oldGame.winner = oldGame.playerBlack;
-  }
-  else{
-    oldGame.winner = oldGame.playerWhite;
-  }
+    
+  });
 
-  await oldGame.save();
-  socket.to(roomId).emit("Opponent Resign");
-});
+  socket.on("Draw", ({ roomId }) => {
+    socket.to(roomId).emit("Opponent Draw");
+  });
 
-socket.on("DrawAccepted", async ({ roomId, gameId }) => {
-  const oldGame = await Game.findById(gameId);
-  if(!oldGame){
-    throw new Error("Vannot find the game");
-  }
-  oldGame.status = "draw";
-  await oldGame.save();
-  socket.to(roomId).emit("DrawAccepted");
-});
+  socket.on("Resign", async ({ roomId, gameId, userId }) => {
+    const game = await Game.findById(gameId);
+    if (!game) {
+      socket.emit("errorMessage", "Cannot find the game");
+      return;
+    }
+    game.status = "finished";
+    if (game.playerWhite.toString() === userId) {
+      game.winner = game.playerBlack;
+    } else {
+      game.winner = game.playerWhite;
+    }
 
-socket.on("DrawDeclined", ({ roomId }) => {
-  socket.to(roomId).emit("DrawDeclined");
-});
+    await game.save();
+    socket.to(roomId).emit("Opponent Resign");
+  });
 
+  socket.on("DrawAccepted", async ({ roomId, gameId }) => {
+    const game = await Game.findById(gameId);
+    if (!game) {
+      socket.emit("errorMessage", "Cannot find the game");
+      return;
+    }
+    game.status = "draw";
+    await game.save();
+    socket.to(roomId).emit("DrawAccepted");
+  });
+
+  socket.on("DrawDeclined", ({ roomId }) => {
+    socket.to(roomId).emit("DrawDeclined");
+  });
 
   socket.on("SendMove", async ({ move, gameId, userId, roomId }) => {
-    console.log("received move");
     try {
       const game = await Game.findById(gameId);
       if (!game) throw new Error("Game not found");
-      
+
       const chess = new Chess();
       for (const m of game.moves) chess.move(m);
 
@@ -198,17 +240,17 @@ socket.on("DrawDeclined", ({ roomId }) => {
         socket.emit("moveRejected", { error: "Illegal move!" });
         return;
       }
-      
+
       game.moves.push(result.san);
 
       const { moveQuality } = await analyzeMove(game, game.moves.slice(0, -1), move);
-      
+
       if (moveQuality && game[moveQuality]) {
-            if (isWhitesTurn) {
-             game[moveQuality].playerWhite += 1;
-               } else {
-                game[moveQuality].playerBlack += 1;
-           }
+        if (isWhitesTurn) {
+          game[moveQuality].playerWhite += 1;
+        } else {
+          game[moveQuality].playerBlack += 1;
+        }
       }
 
       if (chess.isGameOver()) {
@@ -222,8 +264,6 @@ socket.on("DrawDeclined", ({ roomId }) => {
       }
 
       const updatedGame = await game.save();
-      console.log(updatedGame.moves.length);
-      console.log("SEnding back the move!");
       socket.to(roomId).emit("receiveMove", {
         move: result,
         fen: chess.fen(),
@@ -231,7 +271,6 @@ socket.on("DrawDeclined", ({ roomId }) => {
         winner: updatedGame.winner || null,
         allMoves: updatedGame.moves
       });
-
     } catch (err) {
       console.error("❌ Move error:", err.message);
       socket.emit("moveRejected", { error: "Server error." });
@@ -244,30 +283,70 @@ socket.on("DrawDeclined", ({ roomId }) => {
     socket.to(roomId).emit("ReceiveMessage", serverMessage);
   });
 
-  
   socket.on("call-user", ({ targetSocketId, offer }) => {
+    console.log("call received on backend");
     io.to(targetSocketId).emit("incoming-call", { from: socket.id, offer });
   });
-  
+
   socket.on("answer-call", ({ targetSocketId, answer }) => {
+    console.log("answer received on backend");
     io.to(targetSocketId).emit("call-answered", { from: socket.id, answer });
   });
 
+  socket.on('reconnect-call', ({ targetSocketId }) => {
+  io.to(targetSocketId).emit('reconnect-call', { from: socket.id });
+});
+
   socket.on("ice-candidate", ({ targetSocketId, candidate }) => {
+    console.log("Ice candidate received on backend!");
     io.to(targetSocketId).emit("ice-candidate", { from: socket.id, candidate });
   });
+
+  
 
   socket.on("end-call", ({ targetSocketId }) => {
     io.to(targetSocketId).emit("call-ended", { from: socket.id });
   });
 
-  socket.on("disconnect", () => {
-    for (const roomId in rooms) {
-      rooms[roomId] = rooms[roomId].filter(player => player.socketId !== socket.id);
-      if (rooms[roomId].length === 0) delete rooms[roomId];
+  // socket.on("disconnect", () => {
+  //   for (const roomId in rooms) {
+  //     rooms[roomId] = rooms[roomId].filter(player => player.socketId !== socket.id);
+  //     if (rooms[roomId].length === 0) {
+  //       delete rooms[roomId];
+  //       console.log(`Room ${roomId} deleted due to no players`);
+  //     } else {
+  //       console.log(`Player disconnected from room ${roomId}. Remaining players:`, rooms[roomId]);
+  //     }
+  //   }
+  //   console.log(`👋 Client disconnected: ${socket.id}`);
+  // });
+
+  // Corrected disconnect handler
+
+socket.on("disconnect", () => {
+    const roomId = socket.data.roomId; // Get the roomId from socket.data
+
+    if (roomId && rooms[roomId]) {
+        // Find the opponent before removing the disconnected player
+        const opponent = rooms[roomId].find(player => player.socketId !== socket.id);
+
+        // Remove the disconnected player from the room
+        rooms[roomId] = rooms[roomId].filter(player => player.socketId !== socket.id);
+
+        // If an opponent was found, notify them
+        if (opponent) {
+            console.log(`Notifying ${opponent.socketId} that ${socket.id} has disconnected.`);
+            io.to(opponent.socketId).emit("opponent-disconnected", { opponentSocketId: socket.id });
+        }
+
+        // Clean up the room if it's now empty
+        if (rooms[roomId].length === 0) {
+            delete rooms[roomId];
+            console.log(`Room ${roomId} is now empty and has been deleted.`);
+        }
     }
-    console.log("👋 Client disconnected");
-  });
+    console.log(`👋 Client disconnected: ${socket.id}`);
+});
 });
 
 http.listen(process.env.PORT_NO, () => {
