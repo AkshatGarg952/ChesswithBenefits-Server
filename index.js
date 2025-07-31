@@ -13,6 +13,8 @@ import { getGeminiCommentary, getPromptTemplate } from "./src/features/commentar
 import User from "./src/features/users/user.schema.js";
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
+import mongoose, { Types } from 'mongoose';
+
 
 dotenv.config();
 const app = express();
