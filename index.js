@@ -221,6 +221,8 @@ io.on('connection', (socket) => {
   socket.on("SendMove", async ({ move, gameId, userId, roomId }) => {
     try {
       const objectId = Types.ObjectId.isValid(gameId) ? new Types.ObjectId(gameId) : gameId;
+      console.log("xx1", gameId);
+      console.log("xx2", objectId);
       const game = await Game.findById(objectId);
       if (!game) throw new Error("Game not found");
 
