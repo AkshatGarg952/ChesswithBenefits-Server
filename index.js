@@ -57,7 +57,7 @@ app.post('/api/commentary', async (req, res) => {
 const http = createServer(app);
 const io = new Server(http, {
   cors: {
-    origin: ['http://localhost:5173', 'https://chesswith-benefits-client.vercel.app'],
+    origin: ['https://chesswith-benefits-client.vercel.app'],
     credentials: true,
     methods: ['GET', 'POST']
   }
