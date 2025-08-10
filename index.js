@@ -19,7 +19,7 @@ import mongoose, { Types } from 'mongoose';
 dotenv.config();
 const app = express();
 app.use(cors({
-  origin: 'https://chesswith-benefits-client.vercel.app',
+  origin: 'http://localhost:5173',
   credentials: true
 }));
 
@@ -148,22 +148,16 @@ io.on('connection', (socket) => {
           moves: [],
           status: 'onGoing',
           winner: null,
+          whiteTimeLeft: 600,
+          blackTimeLeft: 600,
+          turn: 'white',
+          lastMoveTimestamp: Date.now()
         });
       }
 
       const chess = new Chess();
       for (const move of game.moves) chess.move(move);
 
-      // rooms[roomId].forEach(player => {
-      //   const opponent = rooms[roomId].find(p => p.socketId !== player.socketId);
-      //   console.log("emitting both players joined!");
-      //   io.to(player.socketId).emit("bothPlayersJoined", {
-      //     gameId: game._id.toString(),
-      //     moves: game.moves,
-      //     fen: chess.fen(),
-      //     opponentSocketId: opponent?.socketId || null,
-      //   });
-      // });
 
       rooms[roomId].forEach(player => {
   const opponent = rooms[roomId].find(p => p.socketId !== player.socketId);
@@ -173,8 +167,10 @@ io.on('connection', (socket) => {
     moves: game.moves,
     fen: chess.fen(),
     opponentSocketId: opponent?.socketId || null,
-    opponentUserId: opponent?.userId || null, // Add this line
-    opponentColor: opponent?.color || null,   // Add this line
+    opponentUserId: opponent?.userId || null, 
+    opponentColor: opponent?.color || null,
+    whiteTimeLeft: game.whiteTimeLeft,
+    blackTimeLeft: game.blackTimeLeft
   });
 });
     }
@@ -218,13 +214,68 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit("DrawDeclined");
   });
 
-  socket.on("SendMove", async ({ move, gameId, userId, roomId }) => {
+  socket.on("SendMove", async ({ move, gameId, userId, roomId, timeLeft}) => {
     try {
       const objectId = Types.ObjectId.isValid(gameId) ? new Types.ObjectId(gameId) : gameId;
-      console.log("xx1", gameId);
-      console.log("xx2", objectId);
+      
       const game = await Game.findById(objectId);
       if (!game) throw new Error("Game not found");
+
+      const now = Date.now();
+const elapsed = Math.floor((now - game.lastMoveTimestamp) / 1000);
+
+if (game.turn === 'white') {
+    game.whiteTimeLeft -= elapsed;
+    console.log(`White time left: ${game.whiteTimeLeft}`);
+    if (game.whiteTimeLeft <= 0) {
+        game.status = 'finished';
+        game.winner = game.playerBlack;
+
+        await game.save();
+
+        io.to(game.playerWhite.toString()).emit("gameOver", {
+            reason: "timeout",
+            status: "lost",
+            winner: game.playerBlack
+        });
+
+        // Send to black player → won
+        io.to(game.playerBlack.toString()).emit("gameOver", {
+            reason: "timeout",
+            status: "won",
+            winner: game.playerBlack
+        });
+
+        return;
+    }
+} else {
+    game.blackTimeLeft -= elapsed;
+    if (game.blackTimeLeft <= 0) {
+        game.status = 'finished';
+        game.winner = game.playerWhite;
+
+        await game.save();
+
+        io.to(game.playerBlack.toString()).emit("gameOver", {
+            reason: "timeout",
+            status: "lost",
+            winner: game.playerWhite
+        });
+
+        io.to(game.playerWhite.toString()).emit("gameOver", {
+            reason: "timeout",
+            status: "won",
+            winner: game.playerWhite
+        });
+
+        return;
+    }
+}
+
+
+      
+      game.turn = game.turn === 'white' ? 'black' : 'white';
+      game.lastMoveTimestamp = now;
 
       const chess = new Chess();
       for (const m of game.moves) chess.move(m);
@@ -274,7 +325,9 @@ io.on('connection', (socket) => {
         fen: chess.fen(),
         gameStatus: updatedGame.status,
         winner: updatedGame.winner || null,
-        allMoves: updatedGame.moves
+        allMoves: updatedGame.moves,
+        whiteTimeLeft: game.whiteTimeLeft,
+        blackTimeLeft: game.blackTimeLeft
       });
     } catch (err) {
       console.error("❌ Move error:", err.message);
@@ -307,26 +360,10 @@ io.on('connection', (socket) => {
     io.to(targetSocketId).emit("ice-candidate", { from: socket.id, candidate });
   });
 
-  
-
   socket.on("end-call", ({ targetSocketId }) => {
     io.to(targetSocketId).emit("call-ended", { from: socket.id });
   });
 
-  // socket.on("disconnect", () => {
-  //   for (const roomId in rooms) {
-  //     rooms[roomId] = rooms[roomId].filter(player => player.socketId !== socket.id);
-  //     if (rooms[roomId].length === 0) {
-  //       delete rooms[roomId];
-  //       console.log(`Room ${roomId} deleted due to no players`);
-  //     } else {
-  //       console.log(`Player disconnected from room ${roomId}. Remaining players:`, rooms[roomId]);
-  //     }
-  //   }
-  //   console.log(`👋 Client disconnected: ${socket.id}`);
-  // });
-
-  // Corrected disconnect handler
 
 socket.on("disconnect", () => {
     const roomId = socket.data.roomId; // Get the roomId from socket.data
