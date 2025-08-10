@@ -24,6 +24,10 @@ const gameSchema = new mongoose.Schema({
    Blunder: {playerBlack:{type:Number, default:0},
     playerWhite:{type:Number, default:0}
   },
+  whiteTimeLeft: { type: Number, default: 600 },  
+  blackTimeLeft: { type: Number, default: 600 },
+  lastMoveTimestamp: Number,
+  turn: { type: String, enum: ['white', 'black'] }
 })
 
 const Game = mongoose.model('Game', gameSchema);
