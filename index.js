@@ -19,7 +19,7 @@ import mongoose, { Types } from 'mongoose';
 dotenv.config();
 const app = express();
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: 'https://chesswith-benefits-client.vercel.app',
   credentials: true
 }));
 
