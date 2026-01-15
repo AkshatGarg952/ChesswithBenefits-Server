@@ -7,23 +7,30 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 
-const STOCKFISH_PATH = path.resolve(__dirname, 'stockfish');
+const STOCKFISH_PATH = path.resolve(__dirname, process.platform === 'win32' ? 'stockfish.exe' : 'stockfish');
 
 function createEngine() {
-  const engine = spawn(STOCKFISH_PATH);
+  try {
+    const engine = spawn(STOCKFISH_PATH);
 
-  engine.stderr.on('data', (data) => {
-    console.error('Stockfish error:', data.toString());
-  });
+    engine.stderr.on('data', (data) => {
+      console.error('Stockfish error:', data.toString());
+    });
 
-  engine.on('error', (err) => {
-    console.error('❌ Failed to start Stockfish:', err.message);
-  });
+    engine.on('error', (err) => {
+      console.error('❌ Failed to start Stockfish:', err.message);
+    });
 
-  return engine;
+    return engine;
+  } catch (error) {
+    console.error('❌ Could not spawn Stockfish process:', error);
+    return null;
+  }
 }
 
 function evaluatePosition(engine, fen) {
+  if (!engine) return Promise.resolve(null);
+
   return new Promise((resolve) => {
     let bestEval = null;
 
@@ -42,10 +49,19 @@ function evaluatePosition(engine, fen) {
       }
     });
 
-    engine.stdin.write('uci\n');
-    engine.stdin.write('ucinewgame\n');
-    engine.stdin.write(`position fen ${fen}\n`);
-    engine.stdin.write('go depth 15\n');
+    // Handle process exit/error just in case
+    engine.on('exit', () => resolve(bestEval));
+    engine.on('error', () => resolve(bestEval));
+
+    try {
+      engine.stdin.write('uci\n');
+      engine.stdin.write('ucinewgame\n');
+      engine.stdin.write(`position fen ${fen}\n`);
+      engine.stdin.write('go depth 15\n');
+    } catch (err) {
+      console.error("Error writing to Stockfish:", err);
+      resolve(null);
+    }
   });
 }
 
@@ -60,22 +76,40 @@ export default async function analyzeMove(game, previousMoves, currentMove) {
   const engine1 = createEngine();
   const engine2 = createEngine();
 
-  const [bestEval, playedEval] = await Promise.all([
-    evaluatePosition(engine1, positionBefore),
-    evaluatePosition(engine2, positionAfter),
-  ]);
+  if (!engine1 || !engine2) {
+    console.warn("⚠️ Stockfish engine not available. Skipping analysis.");
+    if (engine1) engine1.kill();
+    if (engine2) engine2.kill();
+    return { moveQuality: 'Unknown', evalLoss: 0 };
+  }
 
-  engine1.kill();
-  engine2.kill();
+  try {
+    const [bestEval, playedEval] = await Promise.all([
+      evaluatePosition(engine1, positionBefore),
+      evaluatePosition(engine2, positionAfter),
+    ]);
 
-  const evalLoss = Math.abs((playedEval ?? 0) - (bestEval ?? 0));
+    engine1.kill();
+    engine2.kill();
 
-  let moveQuality = '';
-  if (evalLoss < 50) moveQuality = 'Best';
-  else if (evalLoss < 100) moveQuality = 'Good';
-  else if (evalLoss < 300) moveQuality = 'Inaccurate';
-  else if (evalLoss < 600) moveQuality = 'Mistake';
-  else moveQuality = 'Blunder';
+    if (bestEval === null || playedEval === null) {
+      return { moveQuality: 'Unknown', evalLoss: 0 };
+    }
 
-  return { moveQuality, evalLoss };
+    const evalLoss = Math.abs((playedEval ?? 0) - (bestEval ?? 0));
+
+    let moveQuality = '';
+    if (evalLoss < 50) moveQuality = 'Best';
+    else if (evalLoss < 100) moveQuality = 'Good';
+    else if (evalLoss < 300) moveQuality = 'Inaccurate';
+    else if (evalLoss < 600) moveQuality = 'Mistake';
+    else moveQuality = 'Blunder';
+
+    return { moveQuality, evalLoss };
+  } catch (error) {
+    console.error("Analysis failure:", error);
+    if (engine1) engine1.kill();
+    if (engine2) engine2.kill();
+    return { moveQuality: 'Unknown', evalLoss: 0 };
+  }
 }
