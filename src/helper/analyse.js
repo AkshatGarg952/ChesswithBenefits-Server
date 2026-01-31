@@ -18,12 +18,12 @@ function createEngine() {
     });
 
     engine.on('error', (err) => {
-      console.error('❌ Failed to start Stockfish:', err.message);
+      console.error('Failed to start Stockfish:', err.message);
     });
 
     return engine;
   } catch (error) {
-    console.error('❌ Could not spawn Stockfish process:', error);
+    console.error('Could not spawn Stockfish process:', error);
     return null;
   }
 }
@@ -77,7 +77,7 @@ export default async function analyzeMove(game, previousMoves, currentMove) {
   const engine2 = createEngine();
 
   if (!engine1 || !engine2) {
-    console.warn("⚠️ Stockfish engine not available. Skipping analysis.");
+    console.warn("Stockfish engine not available. Skipping analysis.");
     if (engine1) engine1.kill();
     if (engine2) engine2.kill();
     return { moveQuality: 'Unknown', evalLoss: 0 };

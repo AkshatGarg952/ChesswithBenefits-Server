@@ -1,26 +1,35 @@
-# Chess with Benefits - Backend
+# Chess with Benefits - Server
 
-The backend server for Chess with Benefits, providing real-time game state management, video call signaling, AI commentary generation, move analysis using Stockfish, and comprehensive game analytics.
+Backend server for Chess with Benefits, providing real-time multiplayer chess gameplay with WebSocket communication, AI-powered commentary, move analysis, and comprehensive game management.
 
 ## Features
 
-* **Real-time Game Management**: WebSocket-based architecture using Socket.io for instant game state synchronization and multiplayer functionality.
-* **Video Call Signaling**: WebRTC signaling server implementation for peer-to-peer video connections between players.
-* **Stockfish Integration**: Professional chess engine integration for move analysis, categorization, and skill assessment.
-* **AI Commentary Generation**: Dynamic commentary system supporting three modes (Roast, Hype, Beginner) with context-aware responses.
-* **Voice Command Processing**: Backend processing and validation of voice-based chess moves.
-* **Match Analytics**: Comprehensive statistics tracking including move accuracy, game outcomes, and player performance metrics.
-* **Real-time Chat**: Instant messaging infrastructure with message persistence and history.
-* **User Authentication**: Secure JWT-based authentication and session management.
+- Real-time multiplayer chess gameplay using Socket.io
+- WebRTC signaling for peer-to-peer video calls between players
+- AI-powered commentary generation with multiple modes (Roast, Hype, Beginner)
+- Chess move analysis and evaluation using Stockfish engine
+- User authentication and session management with JWT
+- Game state persistence with MongoDB
+- Real-time chat messaging between players
+- Match history and player statistics tracking
+- Image upload support via Cloudinary integration
 
-## Demo
+## Tech Stack
 
-* Backend API: [API Endpoint](https://your-backend-url.com)
-* API Documentation: [Swagger/Postman Docs](link-to-docs)
+| Component | Technology |
+|-----------|-----------|
+| Runtime | Node.js |
+| Framework | Express.js |
+| Real-time Communication | Socket.io |
+| Database | MongoDB with Mongoose ODM |
+| Chess Logic | Chess.js |
+| Chess Engine | Stockfish |
+| Authentication | JWT, bcrypt |
+| AI Commentary | Google Generative AI (Gemini) |
+| File Storage | Cloudinary |
+| Environment Config | dotenv |
 
 ## Installation
-
-To run Chess with Benefits backend locally, follow these steps:
 
 1. Clone the repository:
 
@@ -33,229 +42,206 @@ cd ChesswithBenefits-Server
 
 ```bash
 npm install
-# or
-yarn install
-# or
-pnpm install
 ```
 
-3. Install Stockfish:
+3. Set up environment variables:
 
-```bash
-# For Linux/Mac
-brew install stockfish
-# or download from https://stockfishchess.org/download/
-
-# For Windows
-# Download and add to PATH
-```
-
-4. Set Up Environment Variables
-
-Create a `.env` file in the root directory using the provided `.env.example`:
+Create a `.env` file in the root directory based on `.env.example`:
 
 ```env
-PORT=8000
-NODE_ENV=development
+# Server Configuration
+PORT_NO=3000
 
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/chess_with_benefits
+MONGODB_URI=mongodb://localhost:27017/chess
 
-# JWT Secrets
-JWT_SECRET=your_jwt_secret_key
-JWT_EXPIRES_IN=7d
+# Authentication
+JWT_SECRET=your_jwt_secret_key_here
 
-# Stockfish
-STOCKFISH_PATH=/usr/local/bin/stockfish
+# AI Commentary
+GEMINI_API_KEY=your_gemini_api_key_here
 
-# Frontend URL (for CORS)
-FRONTEND_URL=http://localhost:3000
-
-# AI Commentary API (if using external AI)
-AI_API_KEY=your_ai_api_key
-AI_API_URL=https://api.openai.com/v1
+# Cloudinary
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
 ```
 
-5. Run Database Migrations:
+4. Start the development server:
 
 ```bash
-npx prisma migrate dev
-# or
-npm run migrate
+npm start
 ```
 
-6. Seed the database (optional):
-
-```bash
-npm run seed
-```
-
-7. Start the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-```
-
-The server will start on `http://localhost:8000`
-
-## Tech Stack
-
-| Component | Tools & Technologies |
-|-----------|---------------------|
-| **Server Framework** | Node.js, Express |
-| **Real-time Communication** | Socket.io, WebRTC |
-| **Database** | PostgreSQL, Prisma ORM |
-| **Chess Engine** | Stockfish |
-| **Authentication** | JWT, bcrypt |
-| **AI Integration** | OpenAI API / Custom NLP |
-| **Validation** | Zod / Joi |
-| **Deployment** | Render / AWS / Railway |
+The server will start on the port specified in your `.env` file (default: 3000).
 
 ## Project Structure
 
 ```
 ChesswithBenefits-Server/
 ├── src/
-│   ├── controllers/
-│   │   ├── gameController.js
-│   │   ├── userController.js
-│   │   └── analyticsController.js
-│   ├── services/
-│   │   ├── stockfishService.js
-│   │   ├── commentaryService.js
-│   │   └── videoCallService.js
-│   ├── models/
-│   ├── routes/
-│   ├── middleware/
-│   ├── socket/
-│   │   ├── gameSocket.js
-│   │   ├── chatSocket.js
-│   │   └── videoSocket.js
-│   └── utils/
-├── prisma/
-│   └── schema.prisma
+│   ├── database/
+│   │   └── mongoose.js
+│   ├── features/
+│   │   ├── commentary.js
+│   │   ├── games/
+│   │   │   ├── game.schema.js
+│   │   │   ├── game.controller.js
+│   │   │   ├── game.repository.js
+│   │   │   └── game.routes.js
+│   │   ├── results/
+│   │   │   └── result.schema.js
+│   │   └── users/
+│   │       ├── user.schema.js
+│   │       ├── user.controller.js
+│   │       ├── user.repository.js
+│   │       └── user.routes.js
+│   ├── helper/
+│   │   ├── stockfish
+│   │   └── stockfishAnalysis.js
+│   └── middleware/
+│       ├── auth.middleware.js
+│       └── fileUpload.middleware.js
+├── index.js
 └── package.json
 ```
 
 ## API Endpoints
 
 ### Authentication
+
 ```
-POST   /api/auth/register       - Register new user
-POST   /api/auth/login          - User login
-POST   /api/auth/refresh        - Refresh JWT token
+GET  /api/auth/me - Get current authenticated user
 ```
 
-### Game Management
+### User Routes
+
+User management endpoints are defined in `src/features/users/user.routes.js`.
+
+### Game Routes
+
+Game management endpoints are defined in `src/features/games/game.routes.js`.
+
+## Socket.io Events
+
+### Connection Events
+
 ```
-POST   /api/games/create        - Create new game room
-GET    /api/games/:id           - Get game details
-POST   /api/games/:id/move      - Submit a move
-GET    /api/games/:id/analysis  - Get Stockfish analysis
+connection - Client connects to server
+disconnect - Client disconnects from server
 ```
 
-### Analytics
+### Game Room Events
+
 ```
-GET    /api/analytics/user/:id  - Get user statistics
-GET    /api/analytics/matches   - Get match history
-GET    /api/analytics/moves     - Get aggregated move data
+joinRoom - Join a game room
+  Payload: { userId, roomId, color }
+  
+SendMove - Send a chess move
+  Payload: { move, gameId, userId, roomId, timeLeft }
 ```
 
-### Commentary
-```
-POST   /api/commentary/generate - Generate commentary for a move
-PUT    /api/commentary/mode     - Update commentary mode
-```
+### Game Control Events
 
-## WebSocket Events
-
-### Game Events
 ```
-game:join          - Join a game room
-game:move          - Send a chess move
-game:update        - Receive game state updates
-game:end           - Game ended
+Draw - Offer a draw to opponent
+  Payload: { roomId }
+  
+DrawAccepted - Accept draw offer
+  Payload: { roomId, gameId }
+  
+DrawDeclined - Decline draw offer
+  Payload: { roomId }
+  
+Resign - Resign from the game
+  Payload: { roomId }
 ```
 
 ### Video Call Events
+
 ```
-video:offer        - WebRTC offer
-video:answer       - WebRTC answer
-video:ice-candidate - ICE candidate exchange
+offer - WebRTC offer signal
+answer - WebRTC answer signal
+ice-candidate - ICE candidate exchange
 ```
 
 ### Chat Events
+
 ```
-chat:message       - Send/receive messages
-chat:typing        - Typing indicator
+sendMessage - Send chat message
+  Payload: { roomId, message, userId }
+  
+receiveMessage - Receive chat message
 ```
+
+## AI Commentary System
+
+The server integrates Google Generative AI (Gemini) to provide dynamic chess commentary in three distinct modes:
+
+1. **Roast Mode**: Humorous and playful commentary with witty observations
+2. **Hype Mode**: Enthusiastic and encouraging commentary celebrating moves
+3. **Beginner Mode**: Educational commentary explaining strategies and concepts
+
+Commentary is generated based on move quality, game position, and context.
 
 ## Stockfish Integration
 
-The backend integrates Stockfish for:
+The server uses Stockfish chess engine for:
+
 - Move validation and legality checking
-- Position evaluation and best move suggestions
-- Move categorization (Brilliant, Great, Good, Inaccuracy, Mistake, Blunder)
-- Opening book identification
-- Endgame tablebase queries
+- Position evaluation and analysis
+- Move quality assessment (Brilliant, Great, Good, Inaccuracy, Mistake, Blunder)
+- Best move suggestions
+- Game state evaluation
 
-## Commentary System
+## Database Models
 
-Three distinct commentary modes powered by AI:
+### User Schema
+- Username, email, password (hashed)
+- Profile picture
+- Authentication tokens
+- Player statistics
 
-1. **Roast Mode**: Witty, sarcastic commentary with chess humor
-2. **Hype Mode**: Enthusiastic, motivational commentary
-3. **Beginner Mode**: Educational explanations and strategic insights
+### Game Schema
+- Player references (white and black)
+- Move history
+- Game status (ongoing, finished)
+- Time controls
+- Winner information
+- Timestamps
 
-## Database Schema
+### Result Schema
+- Game outcome tracking
+- Player performance metrics
 
-Key models include:
-- **User**: Player profiles and authentication
-- **Game**: Match records and game state
-- **Move**: Individual move history with analysis
-- **Statistics**: Aggregated player performance data
-- **Chat**: Message history and chat logs
+## CORS Configuration
+
+The server is configured to accept requests from:
+- https://chesswith-benefits-client.vercel.app
+- http://localhost:5173
+- http://127.0.0.1:5173
+
+Update CORS settings in `index.js` to add additional allowed origins.
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
+Contributions are welcome. Please follow these steps:
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
 5. Open a Pull Request
-
-## Testing
-
-```bash
-# Run all tests
-npm test
-
-# Run tests with coverage
-npm run test:coverage
-
-# Run specific test suite
-npm test -- --grep "Stockfish"
-```
 
 ## Related Repositories
 
-* Frontend Client: [ChesswithBenefits-Client](https://github.com/AkshatGarg952/ChesswithBenefits-Client)
+- Frontend Client: [ChesswithBenefits-Client](https://github.com/AkshatGarg952/ChesswithBenefits-Client)
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
 ## Contact
 
-For any questions or suggestions, feel free to reach out:
-
-* GitHub: [@AkshatGarg952](https://github.com/AkshatGarg952)
-* Email: your-email@example.com
-
----
-
-Built with ♟️ and WebSockets
+- GitHub: [@AkshatGarg952](https://github.com/AkshatGarg952)
+- Email: gargakshat952@gmail.com

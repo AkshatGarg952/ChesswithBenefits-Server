@@ -126,7 +126,7 @@ io.on('connection', (socket) => {
       socket.data.roomId = roomId;
       socket.data.userId = userId;
 
-      console.log(`✅ User ${userId} (socket ${socket.id}) joined room ${roomId} as ${color}`);
+      console.log(`User ${userId} (socket ${socket.id}) joined room ${roomId} as ${color}`);
 
       socket.emit("assignedColor", color);
       socket.to(roomId).emit("playerJoined", { message: `${userId} joined as ${color}` });
@@ -205,7 +205,7 @@ io.on('connection', (socket) => {
         });
       }
     } catch (error) {
-      console.error("❌ Error in joinRoom:", error);
+      console.error("Error in joinRoom:", error);
       socket.emit("errorMessage", "An error occurred while joining the room.");
     }
   });
@@ -219,7 +219,7 @@ io.on('connection', (socket) => {
       console.log(`Draw offer sent in room ${roomId}`);
       socket.to(roomId).emit("Opponent Draw");
     } catch (error) {
-      console.error("❌ Error in Draw event:", error);
+      console.error("Error in Draw event:", error);
     }
   });
 
@@ -249,7 +249,7 @@ io.on('connection', (socket) => {
       console.log(`User ${userId} resigned in game ${gameId}`);
       socket.to(roomId).emit("Opponent Resign");
     } catch (error) {
-      console.error("❌ Error in Resign event:", error);
+      console.error("Error in Resign event:", error);
       socket.emit("errorMessage", "An error occurred while resigning.");
     }
   });
@@ -274,7 +274,7 @@ io.on('connection', (socket) => {
       console.log(`Draw accepted in game ${gameId}`);
       socket.to(roomId).emit("DrawAccepted");
     } catch (error) {
-      console.error("❌ Error in DrawAccepted event:", error);
+      console.error("Error in DrawAccepted event:", error);
       socket.emit("errorMessage", "An error occurred while accepting draw.");
     }
   });
@@ -288,7 +288,7 @@ io.on('connection', (socket) => {
       console.log(`Draw declined in room ${roomId}`);
       socket.to(roomId).emit("DrawDeclined");
     } catch (error) {
-      console.error("❌ Error in DrawDeclined event:", error);
+      console.error("Error in DrawDeclined event:", error);
     }
   });
 
@@ -408,7 +408,7 @@ io.on('connection', (socket) => {
         blackTimeLeft: game.blackTimeLeft
       });
     } catch (err) {
-      console.error("❌ Move error:", err.message);
+      console.error("Move error:", err.message);
       socket.emit("moveRejected", { error: "Server error." });
     }
   });
@@ -422,7 +422,7 @@ io.on('connection', (socket) => {
       const serverMessage = { message, time: new Date().toISOString() };
       socket.to(roomId).emit("ReceiveMessage", serverMessage);
     } catch (error) {
-      console.error("❌ Error in SendMessage event:", error);
+      console.error("Error in SendMessage event:", error);
     }
   });
 
@@ -435,7 +435,7 @@ io.on('connection', (socket) => {
       console.log("call received on backend, forwarding to", targetSocketId);
       io.to(targetSocketId).emit("incoming-call", { from: socket.id, offer });
     } catch (error) {
-      console.error("❌ Error in call-user event:", error);
+      console.error("Error in call-user event:", error);
     }
   });
 
@@ -448,7 +448,7 @@ io.on('connection', (socket) => {
       console.log("answer received on backend, forwarding to", targetSocketId);
       io.to(targetSocketId).emit("call-answered", { from: socket.id, answer });
     } catch (error) {
-      console.error("❌ Error in answer-call event:", error);
+      console.error("Error in answer-call event:", error);
     }
   });
 
@@ -460,7 +460,7 @@ io.on('connection', (socket) => {
       }
       io.to(targetSocketId).emit('reconnect-call', { from: socket.id });
     } catch (error) {
-      console.error("❌ Error in reconnect-call event:", error);
+      console.error("Error in reconnect-call event:", error);
     }
   });
 
@@ -473,7 +473,7 @@ io.on('connection', (socket) => {
       console.log("Ice candidate received on backend, forwarding to", targetSocketId);
       io.to(targetSocketId).emit("ice-candidate", { from: socket.id, candidate });
     } catch (error) {
-      console.error("❌ Error in ice-candidate event:", error);
+      console.error("Error in ice-candidate event:", error);
     }
   });
 
@@ -485,7 +485,7 @@ io.on('connection', (socket) => {
       }
       io.to(targetSocketId).emit("call-ended", { from: socket.id });
     } catch (error) {
-      console.error("❌ Error in end-call event:", error);
+      console.error("Error in end-call event:", error);
     }
   });
 
@@ -512,11 +512,11 @@ io.on('connection', (socket) => {
         console.log(`Room ${roomId} is now empty and has been deleted.`);
       }
     }
-    console.log(`👋 Client disconnected: ${socket.id}`);
+    console.log(`Client disconnected: ${socket.id}`);
   });
 });
 
 http.listen(process.env.PORT_NO, () => {
-  console.log("🚀 Server started on port", process.env.PORT_NO);
+  console.log("Server started on port", process.env.PORT_NO);
   connectDB();
 });
