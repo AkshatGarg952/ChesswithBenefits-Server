@@ -19,7 +19,7 @@ import mongoose, { Types } from 'mongoose';
 const app = express();
 app.use(cors({
   origin: function (origin, callback) {
-    const allowedOrigins = ['https://chesswith-benefits-client.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
+    const allowedOrigins = ['https://chesswith-benefits-client.vercel.app', 'https://chesswith-benefits-client-n3o3203ct.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'];
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -64,7 +64,7 @@ app.post('/api/commentary', async (req, res) => {
 const http = createServer(app);
 const io = new Server(http, {
   cors: {
-    origin: ['https://chesswith-benefits-client.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: ['https://chesswith-benefits-client.vercel.app', 'https://chesswith-benefits-client-n3o3203ct.vercel.app', 'http://localhost:5173', 'http://127.0.0.1:5173'],
     credentials: true,
     methods: ['GET', 'POST']
   }
