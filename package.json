@@ -29,6 +29,7 @@
     "openai": "^5.8.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
+    "stockfish": "^18.0.8",
     "stockfish.wasm": "^0.10.0"
   },
   "devDependencies": {

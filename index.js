@@ -35,11 +35,14 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 app.get('/api/auth/me', async (req, res) => {
-  const token = req.cookies.token;
+  // Read from Authorization header (consistent with how the client sends it)
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
   if (!token) return res.status(401).json({ message: 'Unauthorized' });
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
     res.json({ user, token });
   } catch (err) {
     res.status(403).json({ message: 'Invalid token' });
@@ -308,21 +311,16 @@ io.on('connection', (socket) => {
         if (game.whiteTimeLeft <= 0) {
           game.status = 'finished';
           game.winner = game.playerBlack;
-
           await game.save();
 
-          io.to(game.playerWhite.toString()).emit("gameOver", {
-            reason: "timeout",
-            status: "lost",
-            winner: game.playerBlack
-          });
+          // FIX: Notify players by looking up their active socket IDs in the room,
+          // not by MongoDB user IDs (which are not socket rooms).
+          const activePlayers = rooms[roomId] || [];
+          const whiteSocketId = activePlayers.find(p => p.color === 'white')?.socketId;
+          const blackSocketId = activePlayers.find(p => p.color === 'black')?.socketId;
 
-          // Send to black player → won
-          io.to(game.playerBlack.toString()).emit("gameOver", {
-            reason: "timeout",
-            status: "won",
-            winner: game.playerBlack
-          });
+          if (whiteSocketId) io.to(whiteSocketId).emit("gameOver", { reason: "timeout", status: "lost", winner: game.playerBlack });
+          if (blackSocketId) io.to(blackSocketId).emit("gameOver", { reason: "timeout", status: "won", winner: game.playerBlack });
 
           return;
         }
@@ -331,20 +329,15 @@ io.on('connection', (socket) => {
         if (game.blackTimeLeft <= 0) {
           game.status = 'finished';
           game.winner = game.playerWhite;
-
           await game.save();
 
-          io.to(game.playerBlack.toString()).emit("gameOver", {
-            reason: "timeout",
-            status: "lost",
-            winner: game.playerWhite
-          });
+          // FIX: Notify players by looking up their active socket IDs in the room.
+          const activePlayers = rooms[roomId] || [];
+          const whiteSocketId = activePlayers.find(p => p.color === 'white')?.socketId;
+          const blackSocketId = activePlayers.find(p => p.color === 'black')?.socketId;
 
-          io.to(game.playerWhite.toString()).emit("gameOver", {
-            reason: "timeout",
-            status: "won",
-            winner: game.playerWhite
-          });
+          if (blackSocketId) io.to(blackSocketId).emit("gameOver", { reason: "timeout", status: "lost", winner: game.playerWhite });
+          if (whiteSocketId) io.to(whiteSocketId).emit("gameOver", { reason: "timeout", status: "won", winner: game.playerWhite });
 
           return;
         }

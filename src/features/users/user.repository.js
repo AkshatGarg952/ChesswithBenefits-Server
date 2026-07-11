@@ -66,14 +66,20 @@ export default class UserR{
 
     async update(id, user){
         const userF = await User.findById(id);
-        if(userF){
-        Object.assign(userF, user);
-         const updatedUser = await userF.save();
-         return updatedUser;
-        }
-        else{
+        if (!userF) {
             throw new Error("Cannot find given user!");
         }
+
+        // FIX: Hash new password before saving to prevent plaintext storage
+        if (user.password) {
+            const saltRounds = 12;
+            const salt = await bcrypt.genSalt(saltRounds);
+            user.password = await bcrypt.hash(user.password, salt);
+        }
+
+        Object.assign(userF, user);
+        const updatedUser = await userF.save();
+        return updatedUser;
     }
 
 

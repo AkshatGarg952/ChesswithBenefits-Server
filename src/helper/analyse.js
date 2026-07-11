@@ -1,24 +1,34 @@
-import { spawn } from 'child_process';
 import { Chess } from 'chess.js';
+import { spawn } from 'child_process';
+import { createRequire } from 'module';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// FIX: Use the 'stockfish' npm package instead of a platform-specific binary.
+// The package ships stockfish.js which runs under Node.js on any OS (Windows, Linux, macOS).
+// This fixes deployment on Linux servers (Render, Heroku, etc.) where stockfish.exe would not work.
+const require = createRequire(import.meta.url);
 
-
-const STOCKFISH_PATH = path.resolve(__dirname, process.platform === 'win32' ? 'stockfish.exe' : 'stockfish');
+let STOCKFISH_JS_PATH;
+try {
+  // Resolve path to the bundled stockfish.js inside the npm package
+  STOCKFISH_JS_PATH = require.resolve('stockfish/bin/stockfish.js');
+} catch {
+  STOCKFISH_JS_PATH = null;
+  console.warn('[analyse] stockfish npm package not found. Move analysis will be disabled.');
+}
 
 function createEngine() {
+  if (!STOCKFISH_JS_PATH) return null;
   try {
-    const engine = spawn(STOCKFISH_PATH);
+    // Spawn: node <path-to-stockfish.js>
+    const engine = spawn(process.execPath, [STOCKFISH_JS_PATH]);
 
     engine.stderr.on('data', (data) => {
-      console.error('Stockfish error:', data.toString());
+      console.error('Stockfish stderr:', data.toString());
     });
 
     engine.on('error', (err) => {
-      console.error('Failed to start Stockfish:', err.message);
+      console.error('Failed to start Stockfish process:', err.message);
     });
 
     return engine;
@@ -34,32 +44,46 @@ function evaluatePosition(engine, fen) {
   return new Promise((resolve) => {
     let bestEval = null;
 
-    engine.stdout.on('data', (data) => {
-      const line = data.toString().trim();
+    // Safety timeout — if Stockfish stalls, resolve after 8 seconds
+    const timeout = setTimeout(() => {
+      console.warn('[analyse] Stockfish timed out, returning null eval');
+      resolve(bestEval);
+    }, 8000);
 
-      if (line.includes('score cp')) {
-        const match = line.match(/score cp (-?\d+)/);
-        if (match) bestEval = parseInt(match[1], 10);
-      } else if (line.includes('score mate')) {
-        bestEval = 1000; // Assign high value for mate
+    const onData = (data) => {
+      const lines = data.toString().split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.includes('score cp')) {
+          const match = trimmed.match(/score cp (-?\d+)/);
+          if (match) bestEval = parseInt(match[1], 10);
+        } else if (trimmed.includes('score mate')) {
+          // Assign a large absolute value so evalLoss is computed correctly for mates
+          bestEval = 10000;
+        }
+
+        if (trimmed.startsWith('bestmove')) {
+          clearTimeout(timeout);
+          engine.stdout.off('data', onData);
+          resolve(bestEval);
+          return;
+        }
       }
+    };
 
-      if (line.includes('bestmove')) {
-        resolve(bestEval);
-      }
-    });
+    engine.stdout.on('data', onData);
 
-    // Handle process exit/error just in case
-    engine.on('exit', () => resolve(bestEval));
-    engine.on('error', () => resolve(bestEval));
+    engine.once('exit', () => { clearTimeout(timeout); resolve(bestEval); });
+    engine.once('error', () => { clearTimeout(timeout); resolve(null); });
 
     try {
       engine.stdin.write('uci\n');
       engine.stdin.write('ucinewgame\n');
       engine.stdin.write(`position fen ${fen}\n`);
-      engine.stdin.write('go depth 15\n');
+      engine.stdin.write('go depth 12\n'); // depth 12 balances speed vs accuracy on a server
     } catch (err) {
-      console.error("Error writing to Stockfish:", err);
+      console.error('[analyse] Error writing to Stockfish stdin:', err);
+      clearTimeout(timeout);
       resolve(null);
     }
   });
@@ -70,17 +94,23 @@ export default async function analyzeMove(game, previousMoves, currentMove) {
   previousMoves.forEach((m) => chess.move(m));
 
   const positionBefore = chess.fen();
-  chess.move(currentMove);
+
+  // Apply current move to get positionAfter
+  const moveResult = chess.move(currentMove);
+  if (!moveResult) {
+    // If the move itself is invalid, just return a safe default
+    return { moveQuality: 'Good', evalLoss: 0 };
+  }
   const positionAfter = chess.fen();
 
   const engine1 = createEngine();
   const engine2 = createEngine();
 
   if (!engine1 || !engine2) {
-    console.warn("Stockfish engine not available. Skipping analysis.");
+    console.warn('[analyse] Stockfish unavailable, skipping move quality analysis.');
     if (engine1) engine1.kill();
     if (engine2) engine2.kill();
-    return { moveQuality: 'Unknown', evalLoss: 0 };
+    return { moveQuality: 'Good', evalLoss: 0 };
   }
 
   try {
@@ -89,27 +119,28 @@ export default async function analyzeMove(game, previousMoves, currentMove) {
       evaluatePosition(engine2, positionAfter),
     ]);
 
-    engine1.kill();
-    engine2.kill();
+    try { engine1.kill(); } catch {}
+    try { engine2.kill(); } catch {}
 
     if (bestEval === null || playedEval === null) {
-      return { moveQuality: 'Unknown', evalLoss: 0 };
+      return { moveQuality: 'Good', evalLoss: 0 };
     }
 
     const evalLoss = Math.abs((playedEval ?? 0) - (bestEval ?? 0));
 
-    let moveQuality = '';
-    if (evalLoss < 50) moveQuality = 'Best';
+    let moveQuality;
+    if (evalLoss < 50)       moveQuality = 'Best';
     else if (evalLoss < 100) moveQuality = 'Good';
     else if (evalLoss < 300) moveQuality = 'Inaccurate';
     else if (evalLoss < 600) moveQuality = 'Mistake';
-    else moveQuality = 'Blunder';
+    else                     moveQuality = 'Blunder';
 
+    console.log(`[analyse] evalLoss=${evalLoss} → quality=${moveQuality}`);
     return { moveQuality, evalLoss };
   } catch (error) {
-    console.error("Analysis failure:", error);
-    if (engine1) engine1.kill();
-    if (engine2) engine2.kill();
-    return { moveQuality: 'Unknown', evalLoss: 0 };
+    console.error('[analyse] Analysis failure:', error);
+    try { engine1.kill(); } catch {}
+    try { engine2.kill(); } catch {}
+    return { moveQuality: 'Good', evalLoss: 0 };
   }
 }

@@ -128,18 +128,19 @@ async getMoveStatsByUserId(userId) {
   
     const result = chess.move(move);
     if (!result) {
-      return res.status(400).json({ error: 'Illegal move' });
+      // FIX: Throw an error instead of using res (not available in repository layer)
+      throw new Error('Illegal move');
     }
 
     game.moves.push(result.san); 
 
-    if (chess.game_over()) {
+    // FIX: Use chess.js v1.x API (isGameOver / isDraw) instead of removed v0.x methods
+    if (chess.isGameOver()) {
       game.status = 'finished';
 
-      if (chess.in_draw()) {
+      if (chess.isDraw()) {
         game.winner = null;
       } else {
-        
         game.winner = chess.turn() === 'w' ? game.playerBlack : game.playerWhite;
       }
     }
