@@ -1,87 +1,52 @@
-import User from "./user.schema.js";
+import User from './user.schema.js';
 import bcrypt from 'bcrypt';
+import { AppError } from '../../utils/appError.js';
 
-export default class UserR{
+const SALT_ROUNDS = 12;
 
-    async register (user){
-        let old = await User.findOne({email:user.email
-          });
-        if(old){
-            throw new Error("User already exists!");
-        }
-
-        old = await User.findOne({username:user.username});
-        if(old){
-            throw new Error("User with this username already exists!");
-        }
-        const newUser = new User({
-            username: user.username,
-            password: user.password,
-            email: user.email,
-          });
-          
-
-       try{
-        const saltRounds = 12;
-        const salt = await bcrypt.genSalt(saltRounds);
-        const hash = await bcrypt.hash(newUser.password, salt);
-        newUser.password = hash;
-        const savedUser = await newUser.save();
-        return savedUser;
-       }
-       catch(err){
-       console.error("Error saving user : ", err);
-       throw err;
-    }
+export default class UserRepository {
+  async register(user) {
+    const existing = await User.findOne({ $or: [{ email: user.email }, { username: user.username }] });
+    if (existing) {
+      const conflictField = existing.email === user.email ? 'email' : 'username';
+      throw new AppError(`An account with this ${conflictField} already exists.`, 409);
     }
 
-    async login(email, pass){
-        const user = await User.findOne({ email: email }); 
-        if (!user) {
-            throw new Error("User not found! Please register first.");
-        }
-        const isMatch = await bcrypt.compare(pass, user.password);
-        if (!isMatch) {
-            throw new Error("Invalid credentials! Please check your email or password.");
-        }
-        return user; 
+    const hashedPassword = await bcrypt.hash(user.password, SALT_ROUNDS);
+    const newUser = new User({ ...user, password: hashedPassword });
+    return newUser.save();
+  }
+
+  async login(email, password) {
+    const user = await User.findOne({ email });
+    const isMatch = user ? await bcrypt.compare(password, user.password) : false;
+
+    if (!user || !isMatch) {
+      throw new AppError('Invalid email or password.', 401);
     }
 
-    async details(id){
-        try{
-        const user = await User.findById(id);
-        if(user){
-            return user;
-        }
-        else{
-            throw new Error("Cannot find the given user!");        
-        }
+    return user;
+  }
+
+  async details(id) {
+    const user = await User.findById(id);
+    if (!user) {
+      throw new AppError('User not found.', 404);
+    }
+    return user;
+  }
+
+  async update(id, updates) {
+    const user = await User.findById(id);
+    if (!user) {
+      throw new AppError('User not found.', 404);
     }
 
-    catch(err){
-        throw new Error("Make sure you have entered the right ID"); 
-}
-    
-    } 
-
-    async update(id, user){
-        const userF = await User.findById(id);
-        if (!userF) {
-            throw new Error("Cannot find given user!");
-        }
-
-        // FIX: Hash new password before saving to prevent plaintext storage
-        if (user.password) {
-            const saltRounds = 12;
-            const salt = await bcrypt.genSalt(saltRounds);
-            user.password = await bcrypt.hash(user.password, salt);
-        }
-
-        Object.assign(userF, user);
-        const updatedUser = await userF.save();
-        return updatedUser;
+    if (updates.password) {
+      updates.password = await bcrypt.hash(updates.password, SALT_ROUNDS);
     }
 
-
- 
+    Object.assign(user, updates);
+    return user.save();
+  }
 }

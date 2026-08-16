@@ -1,51 +1,24 @@
-import gameR from "./game.repository.js";
-const gameRepository = new gameR();
+import GameRepository from './game.repository.js';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { AppError } from '../../utils/appError.js';
 
-export default class gameC {
-    async create(req, res) {
-        const { wId, bId } = req.params;
-        try {
-            const game = await gameRepository.create(wId, bId);
-            res.status(200).send(game);
-        }
-        catch (err) {
-            res.status(400).send(err.message)
-        }
-    }
+const gameRepository = new GameRepository();
 
-    async getGameStatsByUserId(req, res) {
-        const { userId } = req.params;
-        try {
-            const response = await gameRepository.getGameStatsByUserId(userId);
-            res.status(200).send(response);
-        }
+// Stats are personal: being logged in is not enough, it has to be your own id.
+const assertOwnStats = (req) => {
+  if (req.user.id !== req.params.userId) {
+    throw new AppError('You are not allowed to view these statistics.', 403);
+  }
+};
 
-        catch (err) {
-            res.status(400).send(err.message);
-        }
-    }
+export const getGameStatsByUserId = asyncHandler(async (req, res) => {
+  assertOwnStats(req);
+  const stats = await gameRepository.getGameStatsByUserId(req.params.userId);
+  res.status(200).json(stats);
+});
 
-    async getMoveStatsByUserId(req, res) {
-        const { userId } = req.params;
-        try {
-            const response = await gameRepository.getMoveStatsByUserId(userId);
-            res.status(200).send(response);
-        }
-
-        catch (err) {
-            res.status(400).send(err.message);
-        }
-    }
-
-    async move(req, res) {
-        const { gameId, userId } = req.params;
-        const move = req.body;
-        try {
-            const game = await gameRepository.move(gameId, move, userId);
-            res.status(200).send(game);
-        }
-        catch (err) {
-            res.status(400).send(err.message);
-        }
-    }
-}
+export const getMoveStatsByUserId = asyncHandler(async (req, res) => {
+  assertOwnStats(req);
+  const stats = await gameRepository.getMoveStatsByUserId(req.params.userId);
+  res.status(200).json(stats);
+});

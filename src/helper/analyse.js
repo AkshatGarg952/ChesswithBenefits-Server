@@ -1,146 +1,176 @@
 import { Chess } from 'chess.js';
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
-import path from 'path';
+import { env } from '../config/env.js';
+import { logger } from '../utils/logger.js';
 
-// FIX: Use the 'stockfish' npm package instead of a platform-specific binary.
-// The package ships stockfish.js which runs under Node.js on any OS (Windows, Linux, macOS).
-// This fixes deployment on Linux servers (Render, Heroku, etc.) where stockfish.exe would not work.
+// Uses the 'stockfish' npm package instead of a platform-specific binary.
+// The package ships stockfish.js which runs under Node.js on any OS (Windows, Linux, macOS),
+// which matters for deployment on Linux servers.
 const require = createRequire(import.meta.url);
 
 let STOCKFISH_JS_PATH;
 try {
-  // Resolve path to the bundled stockfish.js inside the npm package
   STOCKFISH_JS_PATH = require.resolve('stockfish/bin/stockfish.js');
 } catch {
   STOCKFISH_JS_PATH = null;
-  console.warn('[analyse] stockfish npm package not found. Move analysis will be disabled.');
+  logger.warn('[analyse] stockfish npm package not found. Move analysis is disabled.');
 }
+
+// A forced mate is worth more than any centipawn advantage, but keeping it finite
+// means eval differences around mates still classify sensibly.
+const MATE_SCORE = 10000;
+
+// Centipawn value of each piece, used only by the sacrifice heuristic below.
+const PIECE_VALUE = { p: 100, n: 300, b: 300, r: 500, q: 900, k: 0 };
 
 function createEngine() {
   if (!STOCKFISH_JS_PATH) return null;
   try {
-    // Spawn: node <path-to-stockfish.js>
     const engine = spawn(process.execPath, [STOCKFISH_JS_PATH]);
-
-    engine.stderr.on('data', (data) => {
-      console.error('Stockfish stderr:', data.toString());
-    });
-
-    engine.on('error', (err) => {
-      console.error('Failed to start Stockfish process:', err.message);
-    });
-
+    engine.stderr.on('data', (data) => logger.warn('[analyse] stockfish stderr:', data.toString().trim()));
+    engine.on('error', (err) => logger.warn('[analyse] stockfish process error:', err.message));
     return engine;
   } catch (error) {
-    console.error('Could not spawn Stockfish process:', error);
+    logger.warn('[analyse] could not spawn stockfish:', error.message);
     return null;
   }
 }
 
+/**
+ * Evaluates a position and resolves to a centipawn score **from the perspective
+ * of the side to move** (that is how UCI reports `score cp` / `score mate`).
+ * Resolves to null if the engine stalls, dies, or never reports a score.
+ */
 function evaluatePosition(engine, fen) {
-  if (!engine) return Promise.resolve(null);
-
   return new Promise((resolve) => {
-    let bestEval = null;
+    let score = null;
+    let settled = false;
 
-    // Safety timeout — if Stockfish stalls, resolve after 8 seconds
-    const timeout = setTimeout(() => {
-      console.warn('[analyse] Stockfish timed out, returning null eval');
-      resolve(bestEval);
-    }, 8000);
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      engine.stdout.off('data', onData);
+      engine.off('exit', onExit);
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => {
+      logger.warn('[analyse] stockfish timed out');
+      finish(score);
+    }, env.stockfish.timeoutMs);
 
     const onData = (data) => {
-      const lines = data.toString().split('\n');
-      for (const line of lines) {
+      for (const line of data.toString().split('\n')) {
         const trimmed = line.trim();
-        if (trimmed.includes('score cp')) {
-          const match = trimmed.match(/score cp (-?\d+)/);
-          if (match) bestEval = parseInt(match[1], 10);
-        } else if (trimmed.includes('score mate')) {
-          // Assign a large absolute value so evalLoss is computed correctly for mates
-          bestEval = 10000;
+
+        const mate = trimmed.match(/score mate (-?\d+)/);
+        if (mate) {
+          // Sign matters: `mate -3` means the side to move is getting mated, and
+          // `mate 0` is a position that is already checkmate — also a loss.
+          score = Number(mate[1]) > 0 ? MATE_SCORE : -MATE_SCORE;
+        } else {
+          const cp = trimmed.match(/score cp (-?\d+)/);
+          if (cp) score = parseInt(cp[1], 10);
         }
 
         if (trimmed.startsWith('bestmove')) {
-          clearTimeout(timeout);
-          engine.stdout.off('data', onData);
-          resolve(bestEval);
+          finish(score);
           return;
         }
       }
     };
 
-    engine.stdout.on('data', onData);
+    const onExit = () => finish(score);
 
-    engine.once('exit', () => { clearTimeout(timeout); resolve(bestEval); });
-    engine.once('error', () => { clearTimeout(timeout); resolve(null); });
+    engine.stdout.on('data', onData);
+    engine.once('exit', onExit);
 
     try {
-      engine.stdin.write('uci\n');
       engine.stdin.write('ucinewgame\n');
       engine.stdin.write(`position fen ${fen}\n`);
-      engine.stdin.write('go depth 12\n'); // depth 12 balances speed vs accuracy on a server
+      engine.stdin.write(`go depth ${env.stockfish.depth}\n`);
     } catch (err) {
-      console.error('[analyse] Error writing to Stockfish stdin:', err);
-      clearTimeout(timeout);
-      resolve(null);
+      logger.warn('[analyse] error writing to stockfish stdin:', err.message);
+      finish(null);
     }
   });
 }
 
-export default async function analyzeMove(game, previousMoves, currentMove) {
+function classify(evalLoss) {
+  if (evalLoss < 50) return 'Best';
+  if (evalLoss < 100) return 'Good';
+  if (evalLoss < 300) return 'Inaccurate';
+  if (evalLoss < 600) return 'Mistake';
+  return 'Blunder';
+}
+
+/**
+ * Heuristic (not an engine verdict): a move is "brilliant" when it is essentially
+ * the best move available *and* it deliberately hands the opponent material —
+ * the opponent can immediately capture on the destination square for more than
+ * the move just won. Cheap to compute and it never runs the engine again.
+ */
+function isSacrifice(chessAfterMove, moveResult) {
+  const gained = moveResult.captured ? PIECE_VALUE[moveResult.captured] : 0;
+  const risked = PIECE_VALUE[moveResult.piece] ?? 0;
+
+  const recapture = chessAfterMove
+    .moves({ verbose: true })
+    .some((reply) => reply.to === moveResult.to && reply.captured);
+
+  return recapture && risked - gained >= 200;
+}
+
+/**
+ * Grades a single move. Returns null when the engine is unavailable or gives no
+ * usable score — callers must not record a quality in that case, otherwise every
+ * unanalysed move silently inflates the player's "Good" count.
+ */
+export default async function analyzeMove(previousMoves, currentMove) {
   const chess = new Chess();
-  previousMoves.forEach((m) => chess.move(m));
 
-  const positionBefore = chess.fen();
-
-  // Apply current move to get positionAfter
-  const moveResult = chess.move(currentMove);
-  if (!moveResult) {
-    // If the move itself is invalid, just return a safe default
-    return { moveQuality: 'Good', evalLoss: 0 };
+  let positionBefore;
+  let moveResult;
+  try {
+    for (const m of previousMoves) chess.move(m);
+    positionBefore = chess.fen();
+    // chess.js throws on an illegal move instead of returning null.
+    moveResult = chess.move(currentMove);
+  } catch {
+    return null;
   }
+
   const positionAfter = chess.fen();
 
-  const engine1 = createEngine();
-  const engine2 = createEngine();
-
-  if (!engine1 || !engine2) {
-    console.warn('[analyse] Stockfish unavailable, skipping move quality analysis.');
-    if (engine1) engine1.kill();
-    if (engine2) engine2.kill();
-    return { moveQuality: 'Good', evalLoss: 0 };
-  }
+  const engine = createEngine();
+  if (!engine) return null;
 
   try {
-    const [bestEval, playedEval] = await Promise.all([
-      evaluatePosition(engine1, positionBefore),
-      evaluatePosition(engine2, positionAfter),
-    ]);
+    // Sequential, on one engine: two concurrent Stockfish processes per move
+    // multiplied by every game in flight is far more load than this needs.
+    const bestEval = await evaluatePosition(engine, positionBefore);
+    const playedEval = await evaluatePosition(engine, positionAfter);
 
-    try { engine1.kill(); } catch {}
-    try { engine2.kill(); } catch {}
+    if (bestEval === null || playedEval === null) return null;
 
-    if (bestEval === null || playedEval === null) {
-      return { moveQuality: 'Good', evalLoss: 0 };
+    // Both scores are from their own side-to-move's perspective, and the side to
+    // move flips across the move — so the played position is worth -playedEval to
+    // the mover. Comparing them without that flip (as this used to) inverts the
+    // result and makes every grade meaningless.
+    const evalLoss = Math.max(0, bestEval + playedEval);
+
+    let moveQuality = classify(evalLoss);
+    if (moveQuality === 'Best' && -playedEval > -100 && isSacrifice(chess, moveResult)) {
+      moveQuality = 'Brilliant';
     }
 
-    const evalLoss = Math.abs((playedEval ?? 0) - (bestEval ?? 0));
-
-    let moveQuality;
-    if (evalLoss < 50)       moveQuality = 'Best';
-    else if (evalLoss < 100) moveQuality = 'Good';
-    else if (evalLoss < 300) moveQuality = 'Inaccurate';
-    else if (evalLoss < 600) moveQuality = 'Mistake';
-    else                     moveQuality = 'Blunder';
-
-    console.log(`[analyse] evalLoss=${evalLoss} → quality=${moveQuality}`);
     return { moveQuality, evalLoss };
   } catch (error) {
-    console.error('[analyse] Analysis failure:', error);
-    try { engine1.kill(); } catch {}
-    try { engine2.kill(); } catch {}
-    return { moveQuality: 'Good', evalLoss: 0 };
+    logger.error('[analyse] analysis failure:', error);
+    return null;
+  } finally {
+    try { engine.kill(); } catch { /* already gone */ }
   }
 }

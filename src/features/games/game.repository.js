@@ -1,152 +1,72 @@
-import Game from "./game.schema.js";
-import { Chess } from 'chess.js';
 import mongoose from 'mongoose';
-export default class gameR{
-    async create(wId, bId){
-        if(wId && bId){
-        const game = new Game({
-            playerWhite:wId,
-            playerBlack:bId
-        })
-        return await game.save();
-        }
-        else{
-            throw new Error("Please make sure both id's are correct!");
-        }
-    }
-          
+import Game from './game.schema.js';
 
-   async getGameStatsByUserId(userId) {
-  try {
-    const objectId = new mongoose.Types.ObjectId(userId); 
-    const games = await Game.find({
-      $or: [
-        { playerWhite: objectId },
-        { playerBlack: objectId }
-      ]
-    });
+const QUALITIES = ['Brilliant', 'Best', 'Good', 'Inaccurate', 'Mistake', 'Blunder'];
 
-    const result = {
-      totalGames: games.length,
-      won: 0,
-      lost: 0,
-      draw: 0,
-      noResult: 0
-    };
+export default class GameRepository {
+  async getGameStatsByUserId(userId) {
+    const objectId = new mongoose.Types.ObjectId(userId);
+    const games = await Game.find({ $or: [{ playerWhite: objectId }, { playerBlack: objectId }] })
+      .select('status winner')
+      .lean();
 
-    games.forEach(game => {
+    const result = { totalGames: games.length, won: 0, lost: 0, draw: 0, noResult: 0 };
+
+    for (const game of games) {
       if (game.status === 'draw') {
         result.draw++;
       } else if (game.status === 'noResult') {
         result.noResult++;
-      } else if (game.status === 'finished' && game.winner?.toString() === userId.toString()) {
-        result.won++;
-      } else if (game.status === 'finished' && game.winner && game.winner.toString() !== userId.toString()) {
-        result.lost++;
+      } else if (game.status === 'finished' && game.winner) {
+        if (game.winner.toString() === userId) result.won++;
+        else result.lost++;
       }
-    });
-
-    return result;
-
-  } catch (err) {
-    console.error('Error fetching game stats:', err);
-    throw err;
-  }
-}
-
-async getMoveStatsByUserId(userId) {
-  try {
-    const userObjectId = new mongoose.Types.ObjectId(userId);
-
-    // Fetch all games where the user played
-    const games = await Game.find({
-      $or: [{ playerWhite: userObjectId }, { playerBlack: userObjectId }],
-    });
-
-    let totalMoves = 0;
-    const stats = {
-      brilliant: 0,
-      best: 0,
-      good: 0,
-      inaccurate: 0,
-      mistake: 0,
-      blunder: 0,
-    };
-
-    for (const game of games) {
-      const isWhite = game.playerWhite.equals(userObjectId);
-      const side = isWhite ? 'playerWhite' : 'playerBlack';
-
-      const moveCount = Math.floor(game.moves.length / 2) + (isWhite && game.moves.length % 2 !== 0 ? 1 : 0);
-      totalMoves += moveCount;
-
-      stats.brilliant += game.Brilliant?.[side] || 0;
-      stats.best += game.Best?.[side] || 0;
-      stats.good += game.Good?.[side] || 0;
-      stats.inaccurate += game.Inaccurate?.[side] || 0;
-      stats.mistake += game.Mistake?.[side] || 0;
-      stats.blunder += game.Blunder?.[side] || 0;
     }
 
-    // Calculate percentages
-    const percent = (count) => (totalMoves > 0 ? ((count / totalMoves) * 100).toFixed(2) : "0.00");
+    return result;
+  }
+
+  async getMoveStatsByUserId(userId) {
+    const objectId = new mongoose.Types.ObjectId(userId);
+
+    // Only the move *count* is needed, so let Mongo compute it instead of
+    // shipping every game's full move list back to the app.
+    const games = await Game.aggregate([
+      { $match: { $or: [{ playerWhite: objectId }, { playerBlack: objectId }] } },
+      {
+        $project: {
+          _id: 0,
+          isWhite: { $eq: ['$playerWhite', objectId] },
+          moveCount: { $size: { $ifNull: ['$moves', []] } },
+          ...Object.fromEntries(QUALITIES.map((quality) => [quality, 1])),
+        },
+      },
+    ]);
+
+    let totalMoves = 0;
+    const counts = Object.fromEntries(QUALITIES.map((quality) => [quality, 0]));
+
+    for (const game of games) {
+      const side = game.isWhite ? 'playerWhite' : 'playerBlack';
+
+      // White plays the odd-numbered plies, black the even ones.
+      totalMoves += Math.floor(game.moveCount / 2) + (game.isWhite && game.moveCount % 2 !== 0 ? 1 : 0);
+
+      for (const quality of QUALITIES) {
+        counts[quality] += game[quality]?.[side] || 0;
+      }
+    }
+
+    const percent = (count) => (totalMoves > 0 ? ((count / totalMoves) * 100).toFixed(2) : '0.00');
 
     return {
       totalMoves,
-      brilliant: { count: stats.brilliant, percentage: percent(stats.brilliant) },
-      best: { count: stats.best, percentage: percent(stats.best) },
-      good: { count: stats.good, percentage: percent(stats.good) },
-      inaccurate: { count: stats.inaccurate, percentage: percent(stats.inaccurate) },
-      mistake: { count: stats.mistake, percentage: percent(stats.mistake) },
-      blunder: { count: stats.blunder, percentage: percent(stats.blunder) },
+      ...Object.fromEntries(
+        QUALITIES.map((quality) => [
+          quality.toLowerCase(),
+          { count: counts[quality], percentage: percent(counts[quality]) },
+        ])
+      ),
     };
-  } catch (error) {
-    console.error('Error fetching user stats:', error);
-    throw error;
   }
-}
-
-
-
-
-    
-    async move(gameId, move, userId){
-      const game = await Game.findById(gameId);
-      if (!game) throw new Error("Cannot find the game!");
-
-      const chess = new Chess();
-      for (const m of game.moves) {
-      chess.move(m);
-    }
-
-    const isWhitesTurn = chess.turn() === 'w';
-    const isUserTurn = (isWhitesTurn && game.playerWhite.toString() === userId) || (!isWhitesTurn && game.playerBlack.toString() === userId);
-
-    if (!isUserTurn) {
-      throw new Error("Not your turn!");
-    }
-  
-    const result = chess.move(move);
-    if (!result) {
-      // FIX: Throw an error instead of using res (not available in repository layer)
-      throw new Error('Illegal move');
-    }
-
-    game.moves.push(result.san); 
-
-    // FIX: Use chess.js v1.x API (isGameOver / isDraw) instead of removed v0.x methods
-    if (chess.isGameOver()) {
-      game.status = 'finished';
-
-      if (chess.isDraw()) {
-        game.winner = null;
-      } else {
-        game.winner = chess.turn() === 'w' ? game.playerBlack : game.playerWhite;
-      }
-    }
-
-    return await game.save();
-    
-    }
-
 }

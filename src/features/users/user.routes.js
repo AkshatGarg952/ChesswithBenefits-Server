@@ -1,24 +1,35 @@
-import express from "express";
-import userC from "./user.controller.js";
-import { upload } from "../../middleware/multer.middleware.js";
-import jwtAuth from "../../middleware/jwt.auth.js";
+import express from 'express';
+import rateLimit from 'express-rate-limit';
+import { register, login, getDetails, updateUser } from './user.controller.js';
+import { upload } from '../../middleware/multer.middleware.js';
+import jwtAuth from '../../middleware/jwt.auth.js';
+import { validateBody } from '../../middleware/validate.js';
+import { validateObjectId } from '../../middleware/validateObjectId.js';
+import { registerSchema, loginSchema, updateUserSchema } from './user.validation.js';
+
 const userRouter = express.Router();
-const userController = new userC();
 
-userRouter.post("/register", upload.single('profileImage'), async (req, res) => {
-    userController.register(req, res);
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many attempts, please try again later.' },
 });
 
-userRouter.post("/login", (req, res) => {
-    userController.login(req, res);
-});
+userRouter.post('/register', authLimiter, upload.single('profileImage'), validateBody(registerSchema), register);
 
-userRouter.get("/details/:id", jwtAuth, (req, res) => {
-    userController.getDetails(req, res);
-});
+userRouter.post('/login', authLimiter, validateBody(loginSchema), login);
 
-userRouter.post("/update/:id", jwtAuth, upload.single('profileImage'), (req, res) => {
-    userController.update(req, res);
-});
+userRouter.get('/details/:id', jwtAuth, validateObjectId('id'), getDetails);
+
+userRouter.post(
+  '/update/:id',
+  jwtAuth,
+  validateObjectId('id'),
+  upload.single('profileImage'),
+  validateBody(updateUserSchema),
+  updateUser
+);
 
 export default userRouter;
